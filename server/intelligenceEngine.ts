@@ -6,7 +6,8 @@
  * 3. Cross-Bureau Conflict Detection & Coordination Alerts
  */
 
-import { ComplaintCase, CaseRelationshipSuggestion, CrossBureauConflictAlert, dataStore } from './dataStore';
+import { dataStore } from './dataStore.js';
+import type { ComplaintCase, CaseRelationshipSuggestion, CrossBureauConflictAlert } from './dataStore.js';
 
 // Common stop words in English and Indian regulatory correspondence
 const STOP_WORDS = new Set([

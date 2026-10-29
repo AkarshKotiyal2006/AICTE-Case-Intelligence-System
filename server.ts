@@ -1,14 +1,14 @@
 /**
- * Main Full-Stack Server Entry Point
- * Runs Express backend on port 3000, mounting /api/v1 REST endpoints
- * and Vite middlewares in development mode.
+ * Local / Docker server entry point (NOT used on Vercel; Vercel uses api/index.ts).
+ * Runs the Express app from server/app.ts on port 3000, plus Vite middleware in
+ * development or the built frontend (dist/) in production.
  */
 
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import apiRouter from './server/apiRouter.js';
+import app from './server/app.js';
 
 dotenv.config();
 
@@ -16,49 +16,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function startServer() {
-  const app = express();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
   const isProd = process.env.NODE_ENV === 'production';
-
-  app.use(express.json());
-
-  // Mount versioned REST API
-  app.use('/api/v1', apiRouter);
-
-  // Quick API documentation / overview route
-  app.get('/api/docs', (req, res) => {
-    res.json({
-      title: 'AICTE Institution-Centric Case Intelligence API',
-      version: 'v1',
-      endpoints: [
-        'POST /api/v1/auth/login',
-        'GET /api/v1/auth/me',
-        'GET /api/v1/health',
-        'GET /api/v1/dashboard',
-        'GET /api/v1/cases',
-        'POST /api/v1/cases',
-        'GET /api/v1/cases/:id',
-        'PATCH /api/v1/cases/:id/status',
-        'PATCH /api/v1/cases/:id/reassign',
-        'PATCH /api/v1/cases/:id/transfer',
-        'POST /api/v1/cases/:id/notes',
-        'GET /api/v1/institutions',
-        'GET /api/v1/institutions/:id',
-        'GET /api/v1/linking/suggestions',
-        'POST /api/v1/linking/compare',
-        'POST /api/v1/linking/suggestions/:id/review',
-        'GET /api/v1/conflicts',
-        'PATCH /api/v1/conflicts/:id/status',
-        'GET /api/v1/severity/queue',
-        'POST /api/v1/severity/evaluate',
-        'POST /api/v1/severity/override',
-        'GET /api/v1/graph',
-        'GET /api/v1/workflows/deadlines',
-        'GET /api/v1/notifications',
-        'GET /api/v1/audit-logs',
-      ],
-    });
-  });
 
   if (!isProd) {
     // Mount Vite dev server in middleware mode

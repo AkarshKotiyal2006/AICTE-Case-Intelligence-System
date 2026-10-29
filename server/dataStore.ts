@@ -5,6 +5,7 @@
  */
 
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 export interface User {
@@ -185,7 +186,12 @@ interface AppDatabase {
   notifications: NotificationItem[];
 }
 
-const DATA_DIR = path.resolve(process.cwd(), '.data');
+// On Vercel the deployment filesystem is read-only except /tmp, and /tmp is per-instance
+// and temporary. The committed .data/aicte_store.json is therefore used as read-only seed
+// data, and runtime changes are written to /tmp (they do NOT persist across cold starts).
+const IS_VERCEL = Boolean(process.env.VERCEL);
+const BUNDLED_DB_FILE = path.resolve(process.cwd(), '.data', 'aicte_store.json');
+const DATA_DIR = IS_VERCEL ? path.join(os.tmpdir(), 'aicte-data') : path.resolve(process.cwd(), '.data');
 const DB_FILE = path.resolve(DATA_DIR, 'aicte_store.json');
 
 class DataStore {
@@ -215,9 +221,10 @@ class DataStore {
   }
 
   private loadOrSeed(): AppDatabase {
-    if (fs.existsSync(DB_FILE)) {
+    const sourceFile = fs.existsSync(DB_FILE) ? DB_FILE : fs.existsSync(BUNDLED_DB_FILE) ? BUNDLED_DB_FILE : null;
+    if (sourceFile) {
       try {
-        const raw = fs.readFileSync(DB_FILE, 'utf-8');
+        const raw = fs.readFileSync(sourceFile, 'utf-8');
         const parsed = JSON.parse(raw);
         if (parsed.cases && parsed.institutions && parsed.users) {
           // Ensure trackingToken on all cases

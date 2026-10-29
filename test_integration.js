@@ -2,7 +2,8 @@
  * AICTE Case Intelligence End-to-End Integration Verification Script
  */
 
-const BASE_URL = 'http://127.0.0.1:3000/api/v1';
+// Override with API_BASE_URL to test a deployed site, e.g. https://your-app.vercel.app/api/v1
+const BASE_URL = process.env.API_BASE_URL || 'http://127.0.0.1:3000/api/v1';
 
 async function runTests() {
   console.log('🧪 Starting AICTE Case Intelligence Integration Verification Tests...\n');

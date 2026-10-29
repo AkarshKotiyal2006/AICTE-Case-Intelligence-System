@@ -1,0 +1,356 @@
+diff --git a/.env.example b/.env.example
+index 7a550fe..2e4e492 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1,9 +1,12 @@
+-# GEMINI_API_KEY: Required for Gemini AI API calls.
+-# AI Studio automatically injects this at runtime from user secrets.
+-# Users configure this via the Secrets panel in the AI Studio UI.
+-GEMINI_API_KEY="MY_GEMINI_API_KEY"
++# Copy to .env for local development. NEVER commit a real .env (it is git-ignored).
++#
++# The current code does not read any secret at runtime: the app runs with no
++# environment variables on Vercel. These are optional / reserved:
+ 
+-# APP_URL: The URL where this applet is hosted.
+-# AI Studio automatically injects this at runtime with the Cloud Run service URL.
+-# Used for self-referential links, OAuth callbacks, and API endpoints.
+-APP_URL="MY_APP_URL"
++# GEMINI_API_KEY: only needed if you later add Gemini features (@google/genai is
++# installed but not imported anywhere yet). On Vercel add it under
++# Project Settings -> Environment Variables.
++GEMINI_API_KEY=""
++
++# PORT: local/Docker server only (default 3000). Ignored on Vercel.
++# PORT=3000
+diff --git a/.gitignore b/.gitignore
+index 5a86d2a..ac3f474 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -6,3 +6,4 @@ coverage/
+ *.log
+ .env*
+ !.env.example
++.vercel
+diff --git a/.vercelignore b/.vercelignore
+new file mode 100644
+index 0000000..89f696c
+--- /dev/null
++++ b/.vercelignore
+@@ -0,0 +1,5 @@
++backend
++Dockerfile
++docker-compose.yml
++.dockerignore
++bun.lock
+diff --git a/api/index.ts b/api/index.ts
+new file mode 100644
+index 0000000..1679cd8
+--- /dev/null
++++ b/api/index.ts
+@@ -0,0 +1,7 @@
++/**
++ * Vercel serverless entry point.
++ * vercel.json rewrites /api/* to this function; Express then routes the original URL.
++ */
++import app from '../server/app.js';
++
++export default app;
+diff --git a/package.json b/package.json
+index 4abad25..7db5c67 100644
+--- a/package.json
++++ b/package.json
+@@ -3,13 +3,17 @@
+   "private": true,
+   "version": "0.0.0",
+   "type": "module",
++  "engines": {
++    "node": "22.x"
++  },
+   "scripts": {
+     "dev": "tsx server.ts",
+     "start": "tsx server.ts",
+     "build": "vite build",
+     "preview": "vite preview",
+     "clean": "rm -rf dist server.js",
+-    "lint": "tsc --noEmit"
++    "lint": "tsc --noEmit",
++    "test": "node test_integration.js"
+   },
+   "dependencies": {
+     "@google/genai": "^2.4.0",
+diff --git a/server.ts b/server.ts
+index cee917d..594aaf8 100644
+--- a/server.ts
++++ b/server.ts
+@@ -1,14 +1,14 @@
+ /**
+- * Main Full-Stack Server Entry Point
+- * Runs Express backend on port 3000, mounting /api/v1 REST endpoints
+- * and Vite middlewares in development mode.
++ * Local / Docker server entry point (NOT used on Vercel; Vercel uses api/index.ts).
++ * Runs the Express app from server/app.ts on port 3000, plus Vite middleware in
++ * development or the built frontend (dist/) in production.
+  */
+ 
+ import express from 'express';
+ import path from 'path';
+ import { fileURLToPath } from 'url';
+ import dotenv from 'dotenv';
+-import apiRouter from './server/apiRouter.js';
++import app from './server/app.js';
+ 
+ dotenv.config();
+ 
+@@ -16,50 +16,9 @@ const __filename = fileURLToPath(import.meta.url);
+ const __dirname = path.dirname(__filename);
+ 
+ async function startServer() {
+-  const app = express();
+   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+   const isProd = process.env.NODE_ENV === 'production';
+ 
+-  app.use(express.json());
+-
+-  // Mount versioned REST API
+-  app.use('/api/v1', apiRouter);
+-
+-  // Quick API documentation / overview route
+-  app.get('/api/docs', (req, res) => {
+-    res.json({
+-      title: 'AICTE Institution-Centric Case Intelligence API',
+-      version: 'v1',
+-      endpoints: [
+-        'POST /api/v1/auth/login',
+-        'GET /api/v1/auth/me',
+-        'GET /api/v1/health',
+-        'GET /api/v1/dashboard',
+-        'GET /api/v1/cases',
+-        'POST /api/v1/cases',
+-        'GET /api/v1/cases/:id',
+-        'PATCH /api/v1/cases/:id/status',
+-        'PATCH /api/v1/cases/:id/reassign',
+-        'PATCH /api/v1/cases/:id/transfer',
+-        'POST /api/v1/cases/:id/notes',
+-        'GET /api/v1/institutions',
+-        'GET /api/v1/institutions/:id',
+-        'GET /api/v1/linking/suggestions',
+-        'POST /api/v1/linking/compare',
+-        'POST /api/v1/linking/suggestions/:id/review',
+-        'GET /api/v1/conflicts',
+-        'PATCH /api/v1/conflicts/:id/status',
+-        'GET /api/v1/severity/queue',
+-        'POST /api/v1/severity/evaluate',
+-        'POST /api/v1/severity/override',
+-        'GET /api/v1/graph',
+-        'GET /api/v1/workflows/deadlines',
+-        'GET /api/v1/notifications',
+-        'GET /api/v1/audit-logs',
+-      ],
+-    });
+-  });
+-
+   if (!isProd) {
+     // Mount Vite dev server in middleware mode
+     const { createServer: createViteServer } = await import('vite');
+diff --git a/server/apiRouter.ts b/server/apiRouter.ts
+index c53dfe4..499aaae 100644
+--- a/server/apiRouter.ts
++++ b/server/apiRouter.ts
+@@ -4,8 +4,9 @@
+  */
+ 
+ import express, { Request, Response } from 'express';
+-import { dataStore, User, ComplaintCase } from './dataStore';
+-import { IntelligenceEngine } from './intelligenceEngine';
++import { dataStore } from './dataStore.js';
++import type { User, ComplaintCase } from './dataStore.js';
++import { IntelligenceEngine } from './intelligenceEngine.js';
+ 
+ export const apiRouter = express.Router();
+ 
+diff --git a/server/app.ts b/server/app.ts
+new file mode 100644
+index 0000000..92bfa3c
+--- /dev/null
++++ b/server/app.ts
+@@ -0,0 +1,65 @@
++/**
++ * Express application (API only).
++ * No listen() and no Vite here, so it can be used by:
++ *  - server.ts      (local dev / Docker / any long-running Node host)
++ *  - api/index.ts   (Vercel serverless function)
++ */
++
++import express from 'express';
++import type { Request, Response, NextFunction } from 'express';
++import { apiRouter } from './apiRouter.js';
++
++const app = express();
++
++app.use(express.json());
++
++// Mount versioned REST API
++app.use('/api/v1', apiRouter);
++
++// Quick API documentation / overview route
++app.get('/api/docs', (_req: Request, res: Response) => {
++  res.json({
++    title: 'AICTE Institution-Centric Case Intelligence API',
++    version: 'v1',
++    endpoints: [
++      'POST /api/v1/auth/login',
++      'GET /api/v1/auth/me',
++      'GET /api/v1/health',
++      'GET /api/v1/dashboard',
++      'GET /api/v1/cases',
++      'POST /api/v1/cases',
++      'GET /api/v1/cases/:id',
++      'PATCH /api/v1/cases/:id/status',
++      'PATCH /api/v1/cases/:id/reassign',
++      'PATCH /api/v1/cases/:id/transfer',
++      'POST /api/v1/cases/:id/notes',
++      'GET /api/v1/institutions',
++      'GET /api/v1/institutions/:id',
++      'GET /api/v1/linking/suggestions',
++      'POST /api/v1/linking/compare',
++      'POST /api/v1/linking/suggestions/:id/review',
++      'GET /api/v1/conflicts',
++      'PATCH /api/v1/conflicts/:id/status',
++      'GET /api/v1/severity/queue',
++      'POST /api/v1/severity/evaluate',
++      'POST /api/v1/severity/override',
++      'GET /api/v1/graph',
++      'GET /api/v1/workflows/deadlines',
++      'GET /api/v1/notifications',
++      'GET /api/v1/audit-logs',
++    ],
++  });
++});
++
++// Unknown /api/* routes return JSON 404 (never the SPA's index.html)
++app.use('/api', (_req: Request, res: Response) => {
++  res.status(404).json({ error: 'API route not found' });
++});
++
++// Last-resort error handler so failures return JSON instead of crashing
++app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
++  console.error('Unhandled API error:', err);
++  res.status(500).json({ error: 'Internal server error' });
++});
++
++export default app;
+diff --git a/server/dataStore.ts b/server/dataStore.ts
+index e7750b4..b103e31 100644
+--- a/server/dataStore.ts
++++ b/server/dataStore.ts
+@@ -5,6 +5,7 @@
+  */
+ 
+ import fs from 'fs';
++import os from 'os';
+ import path from 'path';
+ 
+ export interface User {
+@@ -185,7 +186,12 @@ interface AppDatabase {
+   notifications: NotificationItem[];
+ }
+ 
+-const DATA_DIR = path.resolve(process.cwd(), '.data');
++// On Vercel the deployment filesystem is read-only except /tmp, and /tmp is per-instance
++// and temporary. The committed .data/aicte_store.json is therefore used as read-only seed
++// data, and runtime changes are written to /tmp (they do NOT persist across cold starts).
++const IS_VERCEL = Boolean(process.env.VERCEL);
++const BUNDLED_DB_FILE = path.resolve(process.cwd(), '.data', 'aicte_store.json');
++const DATA_DIR = IS_VERCEL ? path.join(os.tmpdir(), 'aicte-data') : path.resolve(process.cwd(), '.data');
+ const DB_FILE = path.resolve(DATA_DIR, 'aicte_store.json');
+ 
+ class DataStore {
+@@ -215,9 +221,10 @@ class DataStore {
+   }
+ 
+   private loadOrSeed(): AppDatabase {
+-    if (fs.existsSync(DB_FILE)) {
++    const sourceFile = fs.existsSync(DB_FILE) ? DB_FILE : fs.existsSync(BUNDLED_DB_FILE) ? BUNDLED_DB_FILE : null;
++    if (sourceFile) {
+       try {
+-        const raw = fs.readFileSync(DB_FILE, 'utf-8');
++        const raw = fs.readFileSync(sourceFile, 'utf-8');
+         const parsed = JSON.parse(raw);
+         if (parsed.cases && parsed.institutions && parsed.users) {
+           // Ensure trackingToken on all cases
+diff --git a/server/intelligenceEngine.ts b/server/intelligenceEngine.ts
+index 8193f7c..702ea94 100644
+--- a/server/intelligenceEngine.ts
++++ b/server/intelligenceEngine.ts
+@@ -6,7 +6,8 @@
+  * 3. Cross-Bureau Conflict Detection & Coordination Alerts
+  */
+ 
+-import { ComplaintCase, CaseRelationshipSuggestion, CrossBureauConflictAlert, dataStore } from './dataStore';
++import { dataStore } from './dataStore.js';
++import type { ComplaintCase, CaseRelationshipSuggestion, CrossBureauConflictAlert } from './dataStore.js';
+ 
+ // Common stop words in English and Indian regulatory correspondence
+ const STOP_WORDS = new Set([
+diff --git a/test_integration.js b/test_integration.js
+index 78ad52d..1ab3591 100644
+--- a/test_integration.js
++++ b/test_integration.js
+@@ -2,7 +2,8 @@
+  * AICTE Case Intelligence End-to-End Integration Verification Script
+  */
+ 
+-const BASE_URL = 'http://127.0.0.1:3000/api/v1';
++// Override with API_BASE_URL to test a deployed site, e.g. https://your-app.vercel.app/api/v1
++const BASE_URL = process.env.API_BASE_URL || 'http://127.0.0.1:3000/api/v1';
+ 
+ async function runTests() {
+   console.log('🧪 Starting AICTE Case Intelligence Integration Verification Tests...\n');
+diff --git a/tsconfig.json b/tsconfig.json
+index fca2349..5a13ce8 100644
+--- a/tsconfig.json
++++ b/tsconfig.json
+@@ -4,7 +4,7 @@
+     "experimentalDecorators": true,
+     "useDefineForClassFields": false,
+     "module": "ESNext",
+-    "types": ["vite/client"],
++    "types": ["vite/client", "node"],
+     "lib": [
+       "ES2022",
+       "DOM",
+@@ -24,5 +24,6 @@
+     "allowImportingTsExtensions": true,
+     "noEmit": true
+   },
+-  "exclude": ["dist"]
++  "include": ["src", "server", "api", "server.ts", "vite.config.ts"],
++  "exclude": ["dist", "node_modules", "backend"]
+ }
+diff --git a/vercel.json b/vercel.json
+index 7693e15..cfcf7a2 100644
+--- a/vercel.json
++++ b/vercel.json
+@@ -1,11 +1,16 @@
+-
+ {
+   "$schema": "https://openapi.vercel.sh/vercel.json",
+-  "framework": "express",
++  "framework": "vite",
++  "installCommand": "npm ci",
+   "buildCommand": "npm run build",
++  "outputDirectory": "dist",
+   "functions": {
+-    "server.ts": {
+-      "includeFiles": "{dist/**,.data/aicte_store.json}"
++    "api/index.ts": {
++      "includeFiles": ".data/**"
+     }
+-  }
++  },
++  "rewrites": [
++    { "source": "/api/(.*)", "destination": "/api" },
++    { "source": "/(.*)", "destination": "/index.html" }
++  ]
+ }

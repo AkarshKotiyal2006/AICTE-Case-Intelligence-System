@@ -4,8 +4,9 @@
  */
 
 import express, { Request, Response } from 'express';
-import { dataStore, User, ComplaintCase } from './dataStore';
-import { IntelligenceEngine } from './intelligenceEngine';
+import { dataStore } from './dataStore.js';
+import type { User, ComplaintCase } from './dataStore.js';
+import { IntelligenceEngine } from './intelligenceEngine.js';
 
 export const apiRouter = express.Router();
 
