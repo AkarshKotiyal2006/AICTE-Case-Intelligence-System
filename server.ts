@@ -8,7 +8,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { apiRouter } from './server/apiRouter';
+import apiRouter from './server/apiRouter.js';
 
 dotenv.config();
 
